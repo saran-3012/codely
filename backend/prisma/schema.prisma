@@ -7,10 +7,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  USER
+  ADMIN
+}
+
 model User {
   id            String         @id @default(uuid())
   email         String         @unique
   passwordHash  String
+  role          Role           @default(USER)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   refreshTokens RefreshToken[]
@@ -23,4 +29,29 @@ model RefreshToken {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+}
+
+model AccessLog {
+  id             String   @id @default(cuid())
+  method         String
+  path           String
+  statusCode     Int
+  responseTimeMs Int
+  ip             String
+  userId         String?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+}
+
+model AppLog {
+  id        String   @id @default(cuid())
+  level     String
+  message   String
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([level])
 }
