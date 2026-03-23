@@ -1,0 +1,85 @@
+name: Sync Codespaces Branch
+
+# Triggered on every push to master.
+# Rebases `release_master__github_codespaces` on top of master,
+# then re-applies the .devcontainer overlay as a single commit.
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write   # needed to push to the release branch
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Use GITHUB_TOKEN — branch protection must allow force pushes
+          # from "GitHub Actions" (or use a PAT stored as a repo secret
+          # and set: token: ${{ secrets.PAT }} here + below).
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch all remote refs
+        run: git fetch origin
+
+      # Create the branch from master if it doesn't exist yet (first run),
+      # otherwise check it out from the remote.
+      - name: Checkout release branch
+        run: |
+          git checkout -B release_master__github_codespaces \
+            origin/release_master__github_codespaces 2>/dev/null || \
+          git checkout -b release_master__github_codespaces origin/master
+
+      # Hard-reset to the latest master — this is the "rebase" equivalent
+      # that discards any old devcontainer commit cleanly.
+      - name: Reset to master
+        run: git reset --hard origin/master
+
+      # Re-apply the .devcontainer overlay.
+      # Written inline so no file needs to exist in master.
+      - name: Apply devcontainer overlay
+        run: |
+          mkdir -p .devcontainer
+          cat > .devcontainer/devcontainer.json << 'DEVCONTAINER'
+          {
+            "name": "Full Stack Code Executor",
+            "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+            "features": {
+              "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+              "ghcr.io/devcontainers/features/node:1": { "version": "20" }
+            },
+            "forwardPorts": [80, 3000, 5432, 2000],
+            "portsAttributes": {
+              "80":   { "label": "App (nginx)",      "onAutoForward": "openPreview" },
+              "3000": { "label": "Backend API",      "onAutoForward": "silent" },
+              "5432": { "label": "PostgreSQL",       "onAutoForward": "silent" },
+              "2000": { "label": "Piston",           "onAutoForward": "silent" }
+            },
+            "postCreateCommand": "docker compose up -d --build",
+            "remoteUser": "vscode"
+          }
+          DEVCONTAINER
+
+      - name: Commit devcontainer overlay
+        run: |
+          git add .devcontainer
+          # Only commit if there is actually a change (idempotent)
+          git diff --cached --quiet && echo "No changes to commit" || \
+            git commit -m "chore: apply devcontainer overlay [skip ci]"
+
+      # Force push — required because the branch history is rewritten each time.
+      # IMPORTANT: in GitHub branch protection for release_master__github_codespaces,
+      # enable "Allow force pushes → GitHub Actions" (or add a bypass rule for
+      # the github-actions[bot] actor). Without this the push will 403.
+      - name: Force push release branch
+        run: git push origin release_master__github_codespaces --force
