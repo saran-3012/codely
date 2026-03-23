@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useApiCall } from '../hooks/useApiCall';
 
 const RegisterPage = () => {
   const { register } = useAuth();
@@ -8,38 +9,33 @@ const RegisterPage = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const { execute: doRegister, loading, error: apiError } = useApiCall(
+    async () => { await register(email, password); navigate('/login'); },
+    { showErrorToast: false }
+  );
+
+  const errorMessage = formError ?? apiError;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setFormError(null);
 
-    if (password !== confirm) {
-      setError('Passwords do not match');
+    if (!email.includes('@')) {
+      setFormError('Please enter a valid email address');
       return;
     }
-
     if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+      setFormError('Password must be at least 8 characters');
+      return;
+    }
+    if (password !== confirm) {
+      setFormError('Passwords do not match');
       return;
     }
 
-    setLoading(true);
-
-    try {
-      await register(email, password);
-      navigate('/login');
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { error?: string } } };
-        setError(axiosErr.response?.data?.error || 'Registration failed');
-      } else {
-        setError('Registration failed');
-      }
-    } finally {
-      setLoading(false);
-    }
+    await doRegister();
   };
 
   return (
@@ -51,9 +47,9 @@ const RegisterPage = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-gray-800 p-8 rounded-lg shadow-lg">
-          {error && (
+          {errorMessage && (
             <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded text-red-300 text-sm">
-              {error}
+              {errorMessage}
             </div>
           )}
 

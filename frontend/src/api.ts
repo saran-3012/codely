@@ -11,6 +11,12 @@ export const setAccessToken = (token: string | null) => {
   accessToken = token;
 };
 
+// Callback invoked when the session is fully expired (e.g. to show a toast)
+let onSessionExpired: (() => void) | null = null;
+export const setSessionExpiredHandler = (fn: () => void) => {
+  onSessionExpired = fn;
+};
+
 // Attach access token to every outgoing request
 api.interceptors.request.use((config) => {
   if (accessToken) {
@@ -19,7 +25,7 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401, try to refresh the access token once then retry
+// On 401, try to refresh the access token once then redirect to login
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -40,6 +46,7 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch {
         accessToken = null;
+        onSessionExpired?.();
         window.location.href = '/login';
       }
     }

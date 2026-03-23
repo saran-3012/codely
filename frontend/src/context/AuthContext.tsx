@@ -1,6 +1,6 @@
 import React, { createContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import api, { setAccessToken } from '../api';
+import api, { setAccessToken, setSessionExpiredHandler } from '../api';
 import { AuthContextType, User } from '../types';
 
 export const AuthContext = createContext<AuthContextType | null>(null);
@@ -12,6 +12,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // Attempt to restore session via refresh token cookie on app load
   useEffect(() => {
+    setSessionExpiredHandler(() => {
+      setUser(null);
+      setToken(null);
+      // Toast shown by the interceptor's caller — nothing extra needed here
+    });
+
     const restoreSession = async () => {
       try {
         const { data } = await axios.post(

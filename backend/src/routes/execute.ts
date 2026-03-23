@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router } from 'express';
 import axios from 'axios';
 import { exec } from 'child_process';
 import { writeFileSync, rmSync, mkdtempSync } from 'fs';
@@ -6,6 +6,8 @@ import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { ValidationError, AppError } from '../lib/errors';
+import { asyncHandler } from '../lib/asyncHandler';
 
 const execAsync = promisify(exec);
 const router = Router();
@@ -72,14 +74,11 @@ const LANG_MAP: Record<string, LangConfig> = {
   },
 };
 
-router.post('/', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/', authMiddleware, asyncHandler<AuthRequest>(async (req, res) => {
   const { language, version, code } = req.body;
   const langKey = (language as string)?.toLowerCase();
 
-  if (!langKey || !code) {
-    res.status(400).json({ error: 'language and code are required' });
-    return;
-  }
+  if (!langKey || !code) throw new ValidationError('language and code are required', 'MISSING_FIELDS');
 
   // ── Use self-hosted Piston when available (Docker) ───────────
   if (PISTON_URL) {
@@ -92,20 +91,16 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response): Promis
       res.json(response.data);
     } catch (error: unknown) {
       if (axios.isAxiosError(error) && error.response) {
-        res.status(error.response.status).json({ error: error.response.data });
-      } else {
-        res.status(500).json({ error: 'Failed to execute code' });
+        throw new AppError(error.response.status, 'PISTON_ERROR', error.response.data?.message || 'Execution failed');
       }
+      throw error;
     }
     return;
   }
 
   // ── Local fallback (no Docker) ────────────────────────────────
   const config = LANG_MAP[langKey];
-  if (!config) {
-    res.status(400).json({ error: `Unsupported language: ${langKey}` });
-    return;
-  }
+  if (!config) throw new ValidationError(`Unsupported language: ${langKey}`, 'UNSUPPORTED_LANGUAGE');
 
   const tmpDir = mkdtempSync(join(tmpdir(), 'codely-'));
   try {
@@ -152,6 +147,6 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response): Promis
   } finally {
     try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
-});
+}));
 
 export default router;

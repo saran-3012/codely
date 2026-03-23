@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useApiCall } from '../hooks/useApiCall';
 import CodeEditor from '../components/CodeEditor';
 import LanguageSelector from '../components/LanguageSelector';
 import OutputPanel from '../components/OutputPanel';
@@ -80,7 +81,17 @@ const EditorPage = () => {
   const [output, setOutput] = useState('');
   const [error, setError] = useState('');
   const [exitCode, setExitCode] = useState<number | null>(null);
-  const [running, setRunning] = useState(false);
+
+  const { execute: runCode, loading: running } = useApiCall(async () => {
+    const { data } = await api.post<ExecuteResponse>('/execute', {
+      language: selectedLang.pistonName,
+      version: selectedLang.version,
+      code,
+    });
+    setOutput(data.run.stdout);
+    setError(data.run.stderr);
+    setExitCode(data.run.code);
+  });
 
   const handleLangChange = (lang: Language) => {
     setSelectedLang(lang);
@@ -91,31 +102,10 @@ const EditorPage = () => {
   };
 
   const handleRun = async () => {
-    setRunning(true);
     setOutput('');
     setError('');
     setExitCode(null);
-
-    try {
-      const { data } = await api.post<ExecuteResponse>('/execute', {
-        language: selectedLang.pistonName,
-        version: selectedLang.version,
-        code,
-      });
-
-      setOutput(data.run.stdout);
-      setError(data.run.stderr);
-      setExitCode(data.run.code);
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { error?: string } } };
-        setError(axiosErr.response?.data?.error || 'Failed to execute code');
-      } else {
-        setError('Failed to execute code');
-      }
-    } finally {
-      setRunning(false);
-    }
+    await runCode();
   };
 
   const handleLogout = async () => {

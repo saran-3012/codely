@@ -1,17 +1,19 @@
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import prisma from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { CONFIG } from '../config';
+import { ValidationError, AuthError, ConflictError, NotFoundError } from '../lib/errors';
+import { asyncHandler } from '../lib/asyncHandler';
 
 const router = Router();
 
 const loginLimiter = rateLimit({
   windowMs: CONFIG.RATE_LIMIT_WINDOW_MS.getIntegerValue(),
   max: CONFIG.RATE_LIMIT_MAX.getIntegerValue(),
-  message: { error: 'Too many login attempts, please try again later' },
+  message: { code: 'RATE_LIMITED', message: 'Too many login attempts, please try again later' },
 });
 
 const generateTokens = (userId: string) => {
@@ -25,122 +27,87 @@ const generateTokens = (userId: string) => {
 };
 
 // Register
-router.post('/register', async (req: Request, res: Response): Promise<void> => {
+router.post('/register', asyncHandler(async (req, res) => {
   const { email, password } = req.body;
+  if (!email || !password) throw new ValidationError('Email and password are required', 'MISSING_FIELDS');
+  if (password.length < 8) throw new ValidationError('Password must be at least 8 characters', 'PASSWORD_TOO_SHORT');
 
-  if (!email || !password) {
-    res.status(400).json({ error: 'Email and password are required' });
-    return;
-  }
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) throw new ConflictError('Email already in use', 'EMAIL_IN_USE');
 
-  if (password.length < 8) {
-    res.status(400).json({ error: 'Password must be at least 8 characters' });
-    return;
-  }
+  const passwordHash = await bcrypt.hash(password, CONFIG.BCRYPT_ROUNDS.getIntegerValue());
+  const user = await prisma.user.create({ data: { email, passwordHash } });
 
-  try {
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      res.status(409).json({ error: 'Email already in use' });
-      return;
-    }
-
-    const passwordHash = await bcrypt.hash(password, CONFIG.BCRYPT_ROUNDS.getIntegerValue());
-    const user = await prisma.user.create({ data: { email, passwordHash } });
-
-    res.status(201).json({ message: 'Account created', userId: user.id });
-  } catch {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+  res.status(201).json({ message: 'Account created', userId: user.id });
+}));
 
 // Login
-router.post('/login', loginLimiter, async (req: Request, res: Response): Promise<void> => {
+router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const { email, password } = req.body;
+  if (!email || !password) throw new ValidationError('Email and password are required', 'MISSING_FIELDS');
 
-  if (!email || !password) {
-    res.status(400).json({ error: 'Email and password are required' });
-    return;
-  }
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) throw new AuthError('Invalid email or password', 'INVALID_CREDENTIALS');
 
-  try {
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      res.status(401).json({ error: 'Invalid credentials' });
-      return;
-    }
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) throw new AuthError('Invalid email or password', 'INVALID_CREDENTIALS');
 
-    const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) {
-      res.status(401).json({ error: 'Invalid credentials' });
-      return;
-    }
+  const { accessToken, refreshToken } = generateTokens(user.id);
 
-    const { accessToken, refreshToken } = generateTokens(user.id);
+  const expiresAt = new Date(Date.now() + CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue());
+  await prisma.refreshToken.create({
+    data: { token: refreshToken, userId: user.id, expiresAt },
+  });
 
-    const expiresAt = new Date(Date.now() + CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue());
-    await prisma.refreshToken.create({
-      data: { token: refreshToken, userId: user.id, expiresAt },
-    });
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: CONFIG.NODE_ENV.getStringValue() === 'production',
+    sameSite: 'strict',
+    maxAge: CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue(),
+  });
 
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: CONFIG.NODE_ENV.getStringValue() === 'production',
-      sameSite: 'strict',
-      maxAge: CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue(),
-    });
-
-    res.json({ accessToken, user: { id: user.id, email: user.email } });
-  } catch {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+  res.json({ accessToken, user: { id: user.id, email: user.email } });
+}));
 
 // Refresh token
-router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
+router.post('/refresh', asyncHandler(async (req, res) => {
   const token = req.cookies.refreshToken;
+  if (!token) throw new AuthError('No refresh token', 'NO_REFRESH_TOKEN');
 
-  if (!token) {
-    res.status(401).json({ error: 'No refresh token' });
-    return;
-  }
-
+  let decoded: { userId: string };
   try {
-    const decoded = jwt.verify(token, CONFIG.REFRESH_TOKEN_SECRET.getStringValue()) as { userId: string };
-
-    const stored = await prisma.refreshToken.findUnique({ where: { token } });
-    if (!stored || stored.expiresAt < new Date()) {
-      res.status(401).json({ error: 'Invalid refresh token' });
-      return;
-    }
-
-    // Rotate refresh token
-    await prisma.refreshToken.delete({ where: { token } });
-
-    const { accessToken, refreshToken: newRefreshToken } = generateTokens(decoded.userId);
-
-    const expiresAt = new Date(Date.now() + CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue());
-    await prisma.refreshToken.create({
-      data: { token: newRefreshToken, userId: decoded.userId, expiresAt },
-    });
-
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: CONFIG.NODE_ENV.getStringValue() === 'production',
-      sameSite: 'strict',
-      maxAge: CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue(),
-    });
-
-    res.json({ accessToken });
+    decoded = jwt.verify(token, CONFIG.REFRESH_TOKEN_SECRET.getStringValue()) as { userId: string };
   } catch {
-    res.status(401).json({ error: 'Invalid refresh token' });
+    throw new AuthError('Invalid refresh token', 'INVALID_REFRESH_TOKEN');
   }
-});
+
+  const stored = await prisma.refreshToken.findUnique({ where: { token } });
+  if (!stored || stored.expiresAt < new Date()) {
+    throw new AuthError('Session expired, please log in again', 'REFRESH_TOKEN_EXPIRED');
+  }
+
+  await prisma.refreshToken.delete({ where: { token } });
+
+  const { accessToken, refreshToken: newRefreshToken } = generateTokens(decoded.userId);
+
+  const expiresAt = new Date(Date.now() + CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue());
+  await prisma.refreshToken.create({
+    data: { token: newRefreshToken, userId: decoded.userId, expiresAt },
+  });
+
+  res.cookie('refreshToken', newRefreshToken, {
+    httpOnly: true,
+    secure: CONFIG.NODE_ENV.getStringValue() === 'production',
+    sameSite: 'strict',
+    maxAge: CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue(),
+  });
+
+  res.json({ accessToken });
+}));
 
 // Logout
-router.post('/logout', async (req: Request, res: Response): Promise<void> => {
+router.post('/logout', asyncHandler(async (req, res) => {
   const token = req.cookies.refreshToken;
-
   if (token) {
     try {
       await prisma.refreshToken.delete({ where: { token } });
@@ -148,28 +115,18 @@ router.post('/logout', async (req: Request, res: Response): Promise<void> => {
       // Token may not exist in DB — that's fine
     }
   }
-
   res.clearCookie('refreshToken');
   res.json({ message: 'Logged out' });
-});
+}));
 
 // Get current user
-router.get('/me', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.userId },
-      select: { id: true, email: true, createdAt: true },
-    });
-
-    if (!user) {
-      res.status(404).json({ error: 'User not found' });
-      return;
-    }
-
-    res.json({ user });
-  } catch {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+router.get('/me', authMiddleware, asyncHandler<AuthRequest>(async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.userId },
+    select: { id: true, email: true, createdAt: true },
+  });
+  if (!user) throw new NotFoundError('User not found', 'USER_NOT_FOUND');
+  res.json({ user });
+}));
 
 export default router;

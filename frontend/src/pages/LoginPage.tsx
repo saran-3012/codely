@@ -1,33 +1,36 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useApiCall } from '../hooks/useApiCall';
 
 const LoginPage = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const { execute: doLogin, loading, error: apiError } = useApiCall(
+    async () => { await login(email, password); navigate('/'); },
+    { showErrorToast: false }
+  );
+
+  const errorMessage = formError ?? apiError;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setLoading(true);
+    setFormError(null);
 
-    try {
-      await login(email, password);
-      navigate('/');
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { error?: string } } };
-        setError(axiosErr.response?.data?.error || 'Login failed');
-      } else {
-        setError('Login failed');
-      }
-    } finally {
-      setLoading(false);
+    if (!email.includes('@')) {
+      setFormError('Please enter a valid email address');
+      return;
     }
+    if (password.length < 8) {
+      setFormError('Password must be at least 8 characters');
+      return;
+    }
+
+    await doLogin();
   };
 
   return (
@@ -39,9 +42,9 @@ const LoginPage = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-gray-800 p-8 rounded-lg shadow-lg">
-          {error && (
+          {errorMessage && (
             <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded text-red-300 text-sm">
-              {error}
+              {errorMessage}
             </div>
           )}
 
