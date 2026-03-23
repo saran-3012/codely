@@ -1,0 +1,93 @@
+services:
+  # ── PostgreSQL Database ──────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-codely}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-codely_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-codely}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-codely}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Piston (self-hosted code execution) ─────────────────────
+  piston:
+    image: ghcr.io/engineer-man/piston
+    restart: unless-stopped
+    ports:
+      - "2000:2000"
+    volumes:
+      - piston_data:/piston/packages
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:2000/api/v2/runtimes || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── Piston runtime installer (runs once then exits) ──────────
+  piston-installer:
+    image: ghcr.io/engineer-man/piston
+    depends_on:
+      piston:
+        condition: service_healthy
+    volumes:
+      - piston_data:/piston/packages
+    entrypoint: >
+      sh -c "
+        cli/index.js install javascript 18.15.0 &&
+        cli/index.js install python 3.10.0 &&
+        cli/index.js install typescript 5.0.3 &&
+        cli/index.js install c 10.2.0 &&
+        cli/index.js install c++ 10.2.0 &&
+        cli/index.js install java 15.0.2 &&
+        cli/index.js install go 1.16.2 &&
+        cli/index.js install rust 1.50.0
+      "
+    restart: "no"
+
+  # ── Backend (Express + TypeScript) ──────────────────────────
+  backend:
+    build:
+      context: ./backend
+      target: production
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      piston:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-codely}:${POSTGRES_PASSWORD:-codely_secret}@db:5432/${POSTGRES_DB:-codely}
+      JWT_SECRET: ${JWT_SECRET}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET}
+      PORT: 3001
+      NODE_ENV: production
+      FRONTEND_URL: http://localhost
+      PISTON_URL: http://piston:2000/api/v2
+    ports:
+      - "3001:3001"
+    command: >
+      sh -c "npx prisma migrate deploy && node dist/index.js"
+
+  # ── Frontend (React + nginx) ─────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+  piston_data:
