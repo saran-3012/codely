@@ -1,0 +1,43 @@
+server {
+    listen 80;
+    server_name _;
+
+    # ── API — proxy to backend ───────────────────────────────────
+    # BACKEND_URL is substituted at container start via envsubst.
+    # Docker Compose sets it to http://backend:3000
+    # Koyeb / Render set it to the backend service's public URL.
+    location /api/ {
+        proxy_pass ${BACKEND_URL}/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # ── Studio app ───────────────────────────────────────────────
+    location /studio {
+        root /usr/share/nginx/html;
+        # Strip the /studio prefix before looking up the file so that
+        # /studio/assets/foo.js is found at html/studio/assets/foo.js
+        try_files $uri $uri/ /studio/index.html;
+    }
+
+    # ── Admin app ────────────────────────────────────────────────
+    location /admin {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /admin/index.html;
+    }
+
+    # ── Root redirect → Studio ───────────────────────────────────
+    location = / {
+        return 302 /studio/;
+    }
+
+    # ── Cache built assets ───────────────────────────────────────
+    location ~* \.(js|css|png|jpg|svg|ico|woff2?)$ {
+        root /usr/share/nginx/html;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
