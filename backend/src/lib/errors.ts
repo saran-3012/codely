@@ -33,3 +33,9 @@ export class NotFoundError extends AppError {
     super(404, code, message);
   }
 }
+
+export class ForbiddenError extends AppError {
+  constructor(message: string, code = 'FORBIDDEN') {
+    super(403, code, message);
+  }
+}
