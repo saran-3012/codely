@@ -22,8 +22,9 @@ services:
     image: ghcr.io/engineer-man/piston
     restart: unless-stopped
     privileged: true          # required — Piston runs sandboxed subcontainers
-    ports:
-      - "2000:2000"
+    # Port 2000 is intentionally not published to the host.
+    # The backend reaches Piston via the Docker internal network (http://piston:2000).
+    # Publishing it is unnecessary and conflicts with Codespaces on port 2000.
     volumes:
       - piston_data:/piston/packages
     healthcheck:
