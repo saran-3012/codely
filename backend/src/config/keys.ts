@@ -40,9 +40,9 @@ export const CONFIG = Object.freeze({
   REFRESH_TOKEN_SECRET:     new ConfigKey('REFRESH_TOKEN_SECRET',     true,  undefined,     true,  false),
 
   // ── Non-sensitive + immutable (app.config.json) ────────────────────────────
-  PORT:                     new ConfigKey('PORT',                     false, '3001',        false, false),
+  PORT:                     new ConfigKey('PORT',                     false, '3000',        false, false),
   NODE_ENV:                 new ConfigKey('NODE_ENV',                 false, 'development', false, false),
-  FRONTEND_URL:             new ConfigKey('FRONTEND_URL',             false, 'http://localhost:5173', false, false),
+  FRONTEND_URL:             new ConfigKey('FRONTEND_URL',             false, 'http://localhost:5173,http://localhost:5174', false, false),
   BCRYPT_ROUNDS:            new ConfigKey('BCRYPT_ROUNDS',            false, '12',          false, false),
   ACCESS_TOKEN_EXPIRY:      new ConfigKey('ACCESS_TOKEN_EXPIRY',      false, '15m',         false, false),
   REFRESH_TOKEN_EXPIRY:     new ConfigKey('REFRESH_TOKEN_EXPIRY',     false, '7d',          false, false),
