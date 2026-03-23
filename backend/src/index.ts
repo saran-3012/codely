@@ -2,19 +2,19 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import dotenv from 'dotenv';
+import { initConfig, CONFIG } from './config';
 import authRoutes from './routes/auth';
 import executeRoutes from './routes/execute';
 
-dotenv.config();
+initConfig();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = CONFIG.PORT.getIntegerValue();
 
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: CONFIG.FRONTEND_URL.getStringValue(),
     credentials: true,
   })
 );

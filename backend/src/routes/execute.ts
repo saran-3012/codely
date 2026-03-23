@@ -10,8 +10,10 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 const execAsync = promisify(exec);
 const router = Router();
 
-const EXEC_TIMEOUT = 10_000;
-const PISTON_URL = process.env.PISTON_URL;
+import { CONFIG } from '../config';
+
+const EXEC_TIMEOUT = CONFIG.EXEC_TIMEOUT_MS.getIntegerValue();
+const PISTON_URL = CONFIG.PISTON_URL.getValue();
 
 // Resolve the ts-node binary bundled with ts-node-dev
 const TS_NODE = resolve(__dirname, '../../node_modules/.bin/ts-node');

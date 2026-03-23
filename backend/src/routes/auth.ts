@@ -4,21 +4,22 @@ import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import prisma from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { CONFIG } from '../config';
 
 const router = Router();
 
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
+  windowMs: CONFIG.RATE_LIMIT_WINDOW_MS.getIntegerValue(),
+  max: CONFIG.RATE_LIMIT_MAX.getIntegerValue(),
   message: { error: 'Too many login attempts, please try again later' },
 });
 
 const generateTokens = (userId: string) => {
-  const accessToken = jwt.sign({ userId }, process.env.JWT_SECRET!, {
-    expiresIn: '15m',
+  const accessToken = jwt.sign({ userId }, CONFIG.JWT_SECRET.getStringValue(), {
+    expiresIn: CONFIG.ACCESS_TOKEN_EXPIRY.getStringValue() as jwt.SignOptions['expiresIn'],
   });
-  const refreshToken = jwt.sign({ userId }, process.env.REFRESH_TOKEN_SECRET!, {
-    expiresIn: '7d',
+  const refreshToken = jwt.sign({ userId }, CONFIG.REFRESH_TOKEN_SECRET.getStringValue(), {
+    expiresIn: CONFIG.REFRESH_TOKEN_EXPIRY.getStringValue() as jwt.SignOptions['expiresIn'],
   });
   return { accessToken, refreshToken };
 };
@@ -44,7 +45,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(password, CONFIG.BCRYPT_ROUNDS.getIntegerValue());
     const user = await prisma.user.create({ data: { email, passwordHash } });
 
     res.status(201).json({ message: 'Account created', userId: user.id });
@@ -77,16 +78,16 @@ router.post('/login', loginLimiter, async (req: Request, res: Response): Promise
 
     const { accessToken, refreshToken } = generateTokens(user.id);
 
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue());
     await prisma.refreshToken.create({
       data: { token: refreshToken, userId: user.id, expiresAt },
     });
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: CONFIG.NODE_ENV.getStringValue() === 'production',
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue(),
     });
 
     res.json({ accessToken, user: { id: user.id, email: user.email } });
@@ -105,7 +106,7 @@ router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.REFRESH_TOKEN_SECRET!) as { userId: string };
+    const decoded = jwt.verify(token, CONFIG.REFRESH_TOKEN_SECRET.getStringValue()) as { userId: string };
 
     const stored = await prisma.refreshToken.findUnique({ where: { token } });
     if (!stored || stored.expiresAt < new Date()) {
@@ -118,16 +119,16 @@ router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
 
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(decoded.userId);
 
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue());
     await prisma.refreshToken.create({
       data: { token: newRefreshToken, userId: decoded.userId, expiresAt },
     });
 
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: CONFIG.NODE_ENV.getStringValue() === 'production',
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: CONFIG.REFRESH_TOKEN_MAX_AGE_MS.getIntegerValue(),
     });
 
     res.json({ accessToken });
