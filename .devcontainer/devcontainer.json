@@ -1,0 +1,16 @@
+{
+  "name": "Full Stack Code Executor",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/node:1": { "version": "20" }
+  },
+  "forwardPorts": [80, 3000, 5432],
+  "portsAttributes": {
+    "80":   { "label": "App (nginx)",      "onAutoForward": "openPreview" },
+    "3000": { "label": "Backend API",      "onAutoForward": "silent" },
+    "5432": { "label": "PostgreSQL",       "onAutoForward": "silent" }
+  },
+  "postCreateCommand": "docker compose up -d --build",
+  "remoteUser": "vscode"
+}
