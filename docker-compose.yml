@@ -28,7 +28,7 @@ services:
     volumes:
       - piston_data:/piston/packages
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:2000/api/v2/runtimes || exit 1"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:2000/api/v2/runtimes', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
       interval: 10s
       timeout: 10s
       retries: 10
@@ -65,7 +65,7 @@ services:
       db:
         condition: service_healthy
       piston:
-        condition: service_healthy
+        condition: service_started
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-codely}:${POSTGRES_PASSWORD:-codely_secret}@db:5432/${POSTGRES_DB:-codely}
       JWT_SECRET: ${JWT_SECRET}
